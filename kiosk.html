@@ -125,7 +125,12 @@ async function load() {
     msg.textContent = 'To move the kiosk here: clear this branch\'s Kiosk Screen cell (Branches, column E), then reload this page.';
     return;                                   // stop — no more codes on this computer
   }
-  if (r.closed) {
+  if (r.staticMode) {
+    qrEl.innerHTML = '<div class="closed">This branch uses a printed QR code now.<br>هذا الفرع يستخدم كود حضور مطبوع الآن</div>';
+    fill.style.width = '0%';
+    setTimeout(load, 5 * 60 * 1000);          // picks up again by itself if switched back to Dynamic
+    return;
+  }  if (r.closed) {
     qrEl.innerHTML = '<div class="closed">Attendance is closed now.<br>التسجيل مغلق الآن</div>';
     fill.style.width = '0%';
     setTimeout(load, r.recheckMs);
