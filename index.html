@@ -48,6 +48,258 @@
 /* The web app address lives in config.js — nothing to edit in this file. */
 
 const Q = new URLSearchParams(location.search);
+const P = { b: Q.get('b') || '', w: Q.get('w') || '', t: Q.get('t') || '', s: Q.get('s') || '',
+            g: Q.get('g') === '1', n: Q.get('n') === '1' };
+if (location.search) history.replaceState(null, '', location.pathname);   // a refresh can't resend an old code
+const view = document.getElementById('view');
+let DEV = '', HOLD = null, GEO = {}, GX = false, NOTE = '';
+
+const MSG = {
+  NO_CODE:        ['bad',  '!', 'Scan the QR code at the branch.', 'امسح كود الحضور الموجود في الفرع'],
+  EXPIRED:        ['wait', '↻', 'This code has expired. Scan it again.', 'الكود انتهى — امسحه مرة أخرى'],
+  INVALID_STATIC: ['bad',  '✕', 'This QR code is no longer valid. Ask the admin for the new one.', 'هذا الكود لم يعد صالحاً — اطلب الكود الجديد من الإدارة'],
+  BAD_BRANCH:     ['bad',  '!', 'This branch is not set up. Tell the admin.', 'الفرع غير مسجل — بلغ الإدارة'],
+  NO_DEVICE:      ['bad',  '!', 'Your browser blocks saving data. Open the link in Chrome or Safari, not in private mode.',
+                   'المتصفح يمنع حفظ البيانات — افتح الرابط في Chrome أو Safari وليس في وضع التصفح الخفي'],
+  REVOKED:        ['bad',  '✕', 'This phone is no longer registered. Contact the admin.', 'هذا الموبايل لم يعد مسجلاً — تواصل مع الإدارة'],
+  INACTIVE:       ['bad',  '✕', 'Your employee code is not active. Contact the admin.', 'كود الموظف غير مفعل — تواصل مع الإدارة'],
+  NETWORK:        ['bad',  '!', 'No connection. Check your internet and scan again.', 'لا يوجد اتصال — تأكد من الإنترنت وامسح مرة أخرى'],
+  ERROR:          ['bad',  '!', 'Something went wrong on the server. Scan again, and tell the admin if it repeats.',
+                   'حدث خطأ — امسح مرة أخرى وبلغ الإدارة لو تكرر']
+};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function show(kind, mark, en, ar, extra) {
+  view.innerHTML =
+    '<div class="mark ' + kind + '">' + mark + '</div>' +
+    '<h1>' + esc(en) + '</h1><p class="ar">' + esc(ar) + '</p>' + (extra || '');
+}
+
+function deviceId() {
+  try {
+    let id = localStorage.getItem('manara_device_id');
+    if (!id) {
+      id = (crypto.randomUUID && crypto.randomUUID()) ||
+           Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('manara_device_id', id);
+    }
+    return localStorage.getItem('manara_device_id') === id ? id : '';
+  } catch (e) { return ''; }
+}
+
+/* Location: try for a few seconds; the server decides what happens without it */
+function getLocation(fresh) {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve({});
+    let done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    setTimeout(() => finish({}), 10000);
+    navigator.geolocation.getCurrentPosition(
+      p => finish({ la: p.coords.latitude.toFixed(6), lo: p.coords.longitude.toFixed(6),
+                    ac: Math.round(p.coords.accuracy) }),
+      () => finish({}),
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: fresh ? 0 : 60000 });
+  });
+}
+
+async function locate(fresh) {
+  show('idle', '…', 'Checking your location…', 'جاري تحديد الموقع…');
+  GEO = await getLocation(fresh);
+  GX = true;
+}
+
+function params(extra) {
+  const p = { b: P.b, d: DEV };
+  if (HOLD) { p.h = HOLD.h; p.hw = HOLD.hw; }
+  else if (P.s) p.s = P.s;
+  else { p.w = P.w; p.t = P.t; }
+  Object.assign(p, GEO);
+  if (GX) p.gx = '1';
+  if (NOTE) p.n = NOTE;
+  return Object.assign(p, extra || {});
+}
+
+async function api(q) {
+  q._ = Date.now();                                        // never use a cached answer
+  const res = await fetch(API_URL + '?' + new URLSearchParams(q).toString());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function go() {
+  show('idle', '…', 'Recording…', 'جاري التسجيل…');
+  try { handle(await api(params({ api: 'checkin' }))); }
+  catch (e) { handle({ status: 'NETWORK' }); }
+}
+
+function retryScreen(en, ar) {
+  show('wait', '!', en, ar, '<button id="again">Try again — حاول مرة أخرى</button>');
+  document.getElementById('again').addEventListener('click', async () => { await locate(true); go(); });
+}
+
+async function handle(r) {
+  if (r.h) HOLD = { h: r.h, hw: r.hw };
+  switch (r.status) {
+    case 'OK': case 'PENDING': case 'REVIEW': {
+      const isIn = r.type === 'IN';
+      const kind = r.status === 'OK' ? 'good' : 'wait';
+      const note = r.status === 'PENDING'
+        ? '<p class="note">This phone is waiting for admin approval. Your scan is saved and will count once it is approved.<br>' +
+          '<span dir="rtl">الموبايل في انتظار اعتماد الإدارة — التسجيل محفوظ وسيُحتسب بعد الاعتماد</span></p>'
+        : r.status === 'REVIEW'
+        ? '<p class="note">Recorded. It will count once the admin reviews it.<br>' +
+          '<span dir="rtl">تم التسجيل — وسيُحتسب بعد مراجعة الإدارة</span></p>' : '';
+      show(kind, kind === 'good' ? '✓' : '…',
+        isIn ? 'Arrival recorded' : 'Departure recorded',
+        isIn ? 'تم تسجيل الحضور' : 'تم تسجيل الانصراف',
+        '<div class="time">' + esc(r.time) + '</div>' +
+        '<div class="who">' + esc(r.name) + '</div>' +
+        '<div class="where">' + esc(r.branchName) + '</div>' + note);
+      return;
+    }
+    case 'DUPLICATE':
+      show('good', '✓', 'Already recorded at ' + r.time, 'تم التسجيل بالفعل الساعة ' + r.time,
+        '<div class="who" style="margin-top:14px">' + esc(r.name) + '</div>');
+      return;
+    case 'REGISTER':      registerForm(r.branchName); return;
+    case 'REGISTERED':    go(); return;
+    case 'NEED_LOCATION': await locate(false); go(); return;
+    case 'NEED_NOTE':     noteForm(); return;
+    case 'NO_LOCATION':
+      retryScreen('Location is needed here. Turn on location for your browser, then try again.',
+                  'الموقع مطلوب هنا — فعّل الموقع للمتصفح ثم حاول مرة أخرى');
+      return;
+    case 'OUT_OF_RANGE':
+      retryScreen('You are about ' + r.distance + ' m from the branch. Move closer, then try again.',
+                  'أنت على بُعد حوالي ' + r.distance + ' متر من الفرع — اقترب ثم حاول مرة أخرى');
+      return;
+  }
+  const m = MSG[r.status] || MSG.ERROR;
+  show(m[0], m[1], m[2], m[3]);
+}
+
+function noteForm() {
+  show('idle', '✎', 'Where are you, and why?', 'أين أنت والغرض من الزيارة؟',
+    '<label for="note">Short note <span dir="rtl">— ملاحظة قصيرة</span></label>' +
+    '<input id="note" maxlength="100" autocomplete="off" placeholder="e.g. Giza – partner meeting">' +
+    '<button id="rec">Record</button><div class="err" id="err"></div>');
+  const input = document.getElementById('note');
+  const err = document.getElementById('err');
+  input.focus();
+  const submit = () => {
+    const v = input.value.trim();
+    if (v.length < 2) { err.textContent = 'Please write a short note. — اكتب ملاحظة قصيرة'; return; }
+    NOTE = v;
+    go();
+  };
+  document.getElementById('rec').addEventListener('click', submit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+}
+
+function registerForm(branchName) {
+  show('idle', '1', 'First time on this phone', 'أول مرة على هذا الموبايل',
+    '<p class="where">' + esc(branchName) + '</p>' +
+    '<label for="emp">Your employee code <span dir="rtl">— كود الموظف</span></label>' +
+    '<input id="emp" inputmode="text" autocomplete="off" autocapitalize="characters">' +
+    '<button id="go">Register this phone</button>' +
+    '<div class="err" id="err"></div>' +
+    '<p class="note">Use your own phone only. The admin approves each phone once.<br>' +
+    '<span dir="rtl">استخدم موبايلك الشخصي فقط — الإدارة تعتمد كل موبايل مرة واحدة</span></p>');
+
+  const input = document.getElementById('emp');
+  const btn = document.getElementById('go');
+  const err = document.getElementById('err');
+  input.focus();
+
+  const submit = async () => {
+    const code = input.value.trim();
+    if (!code) { err.textContent = 'Enter your employee code. — اكتب كود الموظف'; return; }
+    btn.disabled = true; err.textContent = '';
+    try {
+      const r = await api(params({ api: 'register', e: code, ua: navigator.userAgent }));
+      if (r.status === 'UNKNOWN_EMP') {
+        btn.disabled = false;
+        err.textContent = 'This code is not in the employee list. Check it and try again. — الكود غير موجود';
+        return;
+      }
+      handle(r);
+    } catch (e) {
+      btn.disabled = false;
+      err.textContent = MSG.NETWORK[2];
+    }
+  };
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+}
+
+(async function start() {
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  if (typeof API_URL === 'undefined' || !/\/exec$/.test(API_URL)) {
+    show('bad', '!', 'Setup incomplete: config.js has no web app address.', 'الإعداد غير مكتمل — بلغ الإدارة');
+    return;
+  }
+  if (!P.b || !(P.t || P.s)) { handle({ status: 'NO_CODE' }); return; }
+  DEV = deviceId();
+  if (!DEV) { handle({ status: 'NO_DEVICE' }); return; }
+  if (P.g) await locate(false);
+  go();                     // the server answers NEED_NOTE (with a 10-minute hold) if a note is required
+})();
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Al-Manara Attendance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --night:#0E2A47; --lamp:#F2B705; --ink:#1B2B3A; --muted:#5E7184; --line:#D5DEE7;
+          --good:#1A7F4B; --wait:#9A6700; --bad:#B42318; }
+  body { margin:0; background:#F4F7FA; color:var(--ink);
+    font-family:'IBM Plex Sans Arabic', Tahoma, 'Segoe UI', Arial, sans-serif; }
+  .top { background:var(--night); color:#fff; padding:14px 20px; font-weight:600; }
+  .top span { color:var(--lamp); }
+  #view { max-width:440px; margin:0 auto; padding:28px 20px 40px; }
+  .mark { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+          font-size:34px; color:#fff; margin-bottom:18px; }
+  .good { background:var(--good); } .wait { background:var(--wait); } .bad { background:var(--bad); }
+  .idle { background:var(--muted); }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .ar { direction:rtl; text-align:right; color:var(--muted); margin:4px 0 0; font-size:18px; }
+  .time { font-size:56px; font-weight:700; font-variant-numeric:tabular-nums; margin:18px 0 4px; }
+  .who { font-size:18px; unicode-bidi:plaintext; text-align:start; }
+  .where { color:var(--muted); }
+  label { display:block; margin-top:22px; font-weight:600; }
+  input { width:100%; box-sizing:border-box; font:inherit; font-size:22px; padding:12px 14px;
+          border:2px solid var(--line); border-radius:8px; margin-top:8px; }
+  input:focus { outline:none; border-color:var(--night); }
+  button { width:100%; font:inherit; font-size:18px; font-weight:600; padding:14px; border:0; border-radius:8px;
+           background:var(--night); color:#fff; margin-top:14px; }
+  button:focus-visible { outline:3px solid var(--lamp); outline-offset:2px; }
+  button:disabled { opacity:.5; }
+  .err { color:var(--bad); margin-top:10px; min-height:1.3em; }
+  .note { color:var(--muted); font-size:14px; margin-top:22px; }
+</style>
+</head>
+<body>
+<div class="top">Al-Manara <span>Attendance</span></div>
+<div id="view">
+  <div class="mark idle">…</div>
+  <h1>Recording…</h1>
+  <p class="ar">جاري التسجيل…</p>
+</div>
+
+<script src="config.js"></script>
+<script>
+/* The web app address lives in config.js — nothing to edit in this file. */
+
+const Q = new URLSearchParams(location.search);
 const P = { b: Q.get('b') || '', w: Q.get('w') || '', t: Q.get('t') || '', g: Q.get('g') === '1' };
 let GEO = {};                                              // filled only when the branch has GPS on
 if (location.search) history.replaceState(null, '', location.pathname);   // a refresh can't resend an old code
