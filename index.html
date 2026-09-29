@@ -48,7 +48,8 @@
 /* The web app address lives in config.js — nothing to edit in this file. */
 
 const Q = new URLSearchParams(location.search);
-const P = { b: Q.get('b') || '', w: Q.get('w') || '', t: Q.get('t') || '' };
+const P = { b: Q.get('b') || '', w: Q.get('w') || '', t: Q.get('t') || '', g: Q.get('g') === '1' };
+let GEO = {};                                              // filled only when the branch has GPS on
 if (location.search) history.replaceState(null, '', location.pathname);   // a refresh can't resend an old code
 const view = document.getElementById('view');
 
@@ -86,6 +87,21 @@ function deviceId() {
     }
     return localStorage.getItem('manara_device_id') === id ? id : '';
   } catch (e) { return ''; }
+}
+
+/* Soft GPS: try for a few seconds, never block the scan */
+function getLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve({});
+    let done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    setTimeout(() => finish({}), 10000);
+    navigator.geolocation.getCurrentPosition(
+      p => finish({ la: p.coords.latitude.toFixed(6), lo: p.coords.longitude.toFixed(6),
+                    ac: Math.round(p.coords.accuracy) }),
+      () => finish({}),
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: 60000 });
+  });
 }
 
 async function api(params) {
@@ -139,7 +155,7 @@ function registerForm(branchName) {
     if (!code) { err.textContent = 'Enter your employee code. — اكتب كود الموظف'; return; }
     btn.disabled = true; err.textContent = '';
     try {
-      const r = await api({ api: 'register', b: P.b, w: P.w, t: P.t, d: deviceId(), e: code, ua: navigator.userAgent });
+      const r = await api(Object.assign({ api: 'register', b: P.b, w: P.w, t: P.t, d: deviceId(), e: code, ua: navigator.userAgent }, GEO));
       if (r.status === 'UNKNOWN_EMP') {
         btn.disabled = false;
         err.textContent = 'This code is not in the employee list. Check it and try again. — الكود غير موجود';
@@ -164,8 +180,12 @@ function registerForm(branchName) {
   if (!P.b || !P.t) { handle({ status: 'NO_CODE' }); return; }
   const id = deviceId();
   if (!id) { handle({ status: 'NO_DEVICE' }); return; }
+  if (P.g) {
+    show('idle', '…', 'Checking your location…', 'جاري تحديد الموقع…');
+    GEO = await getLocation();
+  }
   try {
-    handle(await api({ api: 'checkin', b: P.b, w: P.w, t: P.t, d: id }));
+    handle(await api(Object.assign({ api: 'checkin', b: P.b, w: P.w, t: P.t, d: id }, GEO)));
   } catch (e) {
     handle({ status: 'NETWORK' });
   }
