@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Al-Manara Attendance — Kiosk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --night:#0E2A47; --lamp:#F2B705; --mist:#A9C1D9; --paper:#FFFFFF; }
+  html, body { margin:0; height:100%; background:var(--night); color:var(--paper);
+    font-family:'IBM Plex Sans Arabic', Tahoma, 'Segoe UI', Arial, sans-serif; overflow:hidden; }
+  .wrap { height:100%; display:grid; grid-template-rows:auto 1fr auto; padding:3vh 4vw; box-sizing:border-box; }
+  header { display:flex; justify-content:space-between; align-items:baseline; gap:24px; }
+  #branch { font-size:clamp(22px,3.2vw,40px); font-weight:600; }
+  #clock { font-size:clamp(28px,4.4vw,60px); font-weight:600; font-variant-numeric:tabular-nums; color:var(--lamp); }
+  main { display:flex; align-items:center; justify-content:center; gap:5vw; flex-wrap:wrap; }
+  #plate { background:var(--paper); padding:20px; border-radius:6px; line-height:0; }
+  #qr img, #qr canvas { display:block; }
+  .how { max-width:26ch; }
+  .how p { margin:0 0 18px; font-size:clamp(18px,2.2vw,28px); line-height:1.35; }
+  .how .ar { direction:rtl; color:var(--mist); }
+  #beam { height:6px; background:rgba(255,255,255,.12); margin-top:2vh; }
+  #fill { height:100%; width:100%; background:var(--lamp); }
+  #msg { min-height:1.4em; margin-top:10px; color:var(--lamp); font-size:18px; }
+  .closed { color:var(--night); font-size:26px; padding:60px 40px; line-height:1.4; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div id="branch">Al-Manara</div>
+    <div id="clock"></div>
+  </header>
+  <main>
+    <div id="plate"><div id="qr"></div></div>
+    <div class="how">
+      <p>Scan with your phone camera to record arrival or departure.</p>
+      <p class="ar">امسح الكود بكاميرا الموبايل لتسجيل الحضور أو الانصراف</p>
+    </div>
+  </main>
+  <footer>
+    <div id="beam"><div id="fill"></div></div>
+    <div id="msg"></div>
+  </footer>
+</div>
+
+<script src="config.js"></script>
+<script>
+/* The web app address lives in config.js — nothing to edit in this file. */
+const KEY  = new URLSearchParams(location.search).get('kiosk') || '';
+const qrEl = document.getElementById('qr');
+const fill = document.getElementById('fill');
+const msg  = document.getElementById('msg');
+let anim = null;
+
+function screenId() {
+  try {
+    let id = localStorage.getItem('manara_kiosk_screen');
+    if (!id) {
+      id = (crypto.randomUUID && crypto.randomUUID()) ||
+           Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('manara_kiosk_screen', id);
+    }
+    return localStorage.getItem('manara_kiosk_screen') === id ? id : '';
+  } catch (e) { return ''; }
+}
+const SCREEN = screenId();
+
+async function api(params) {
+  params._ = Date.now();                                   // never use a cached answer
+  const res = await fetch(API_URL + '?' + new URLSearchParams(params).toString());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function qrSize() {
+  return Math.floor(Math.max(220, Math.min(window.innerHeight * 0.58, window.innerWidth * 0.5, 560)));
+}
+
+function drawQR(text) {
+  qrEl.innerHTML = '';
+  const s = qrSize();
+  new QRCode(qrEl, { text: text, width: s, height: s, correctLevel: QRCode.CorrectLevel.M });
+}
+
+function runBeam(msLeft, windowSec) {
+  const total = windowSec * 1000;
+  const end = Date.now() + msLeft;
+  cancelAnimationFrame(anim);
+  (function tick() {
+    const left = Math.max(0, end - Date.now());
+    fill.style.width = (left / total * 100) + '%';
+    if (left > 0) anim = requestAnimationFrame(tick);
+  })();
+}
+
+async function load() {
+  if (typeof API_URL === 'undefined' || !/\/exec$/.test(API_URL)) {
+    msg.textContent = 'Setup incomplete: config.js has no web app address.';
+    return;
+  }
+  let r;
+  try {
+    r = await api({ api: 'kiosk', k: KEY, s: SCREEN });
+  } catch (e) {
+    msg.textContent = 'No connection to the attendance server. Retrying in 5 seconds.';
+    qrEl.innerHTML = '';
+    setTimeout(load, 5000);
+    return;
+  }
+  if (r.status === 'ERROR') {
+    msg.textContent = r.message + ' Retrying in 30 seconds.';
+    qrEl.innerHTML = '';
+    setTimeout(load, 30000);
+    return;
+  }
+  msg.textContent = '';
+  document.getElementById('branch').textContent = r.branchName;
+  if (r.denied) {
+    qrEl.innerHTML = '<div class="closed">This computer is not the approved kiosk for this branch.<br>' +
+                     'هذا الجهاز غير معتمد كشاشة حضور لهذا الفرع</div>';
+    fill.style.width = '0%';
+    msg.textContent = 'To move the kiosk here: clear this branch\'s Kiosk Screen cell (Branches, column E), then reload this page.';
+    return;                                   // stop — no more codes on this computer
+  }
+  if (r.closed) {
+    qrEl.innerHTML = '<div class="closed">Attendance is closed now.<br>التسجيل مغلق الآن</div>';
+    fill.style.width = '0%';
+    setTimeout(load, r.recheckMs);
+    return;
+  }
+  drawQR(r.url);
+  runBeam(r.msLeft, r.windowSec || 20);
+  setTimeout(load, r.msLeft + 300);
+}
+
+function clock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+clock();
+setInterval(clock, 1000);
+load();
+</script>
+</body>
+</html>
