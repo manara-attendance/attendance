@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Al-Manara Attendance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --night:#0E2A47; --lamp:#F2B705; --ink:#1B2B3A; --muted:#5E7184; --line:#D5DEE7;
+          --good:#1A7F4B; --wait:#9A6700; --bad:#B42318; }
+  body { margin:0; background:#F4F7FA; color:var(--ink);
+    font-family:'IBM Plex Sans Arabic', Tahoma, 'Segoe UI', Arial, sans-serif; }
+  .top { background:var(--night); color:#fff; padding:14px 20px; font-weight:600; }
+  .top span { color:var(--lamp); }
+  #view { max-width:440px; margin:0 auto; padding:28px 20px 40px; }
+  .mark { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+          font-size:34px; color:#fff; margin-bottom:18px; }
+  .good { background:var(--good); } .wait { background:var(--wait); } .bad { background:var(--bad); }
+  .idle { background:var(--muted); }
+  h1 { font-size:24px; margin:0 0 4px; }
+  .ar { direction:rtl; text-align:right; color:var(--muted); margin:4px 0 0; font-size:18px; }
+  .time { font-size:56px; font-weight:700; font-variant-numeric:tabular-nums; margin:18px 0 4px; }
+  .who { font-size:18px; unicode-bidi:plaintext; text-align:start; }
+  .where { color:var(--muted); }
+  label { display:block; margin-top:22px; font-weight:600; }
+  input { width:100%; box-sizing:border-box; font:inherit; font-size:22px; padding:12px 14px;
+          border:2px solid var(--line); border-radius:8px; margin-top:8px; }
+  input:focus { outline:none; border-color:var(--night); }
+  button { width:100%; font:inherit; font-size:18px; font-weight:600; padding:14px; border:0; border-radius:8px;
+           background:var(--night); color:#fff; margin-top:14px; }
+  button:focus-visible { outline:3px solid var(--lamp); outline-offset:2px; }
+  button:disabled { opacity:.5; }
+  .err { color:var(--bad); margin-top:10px; min-height:1.3em; }
+  .note { color:var(--muted); font-size:14px; margin-top:22px; }
+</style>
+</head>
+<body>
+<div class="top">Al-Manara <span>Attendance</span></div>
+<div id="view">
+  <div class="mark idle">…</div>
+  <h1>Recording…</h1>
+  <p class="ar">جاري التسجيل…</p>
+</div>
+
+<script src="config.js"></script>
+<script>
+/* The web app address lives in config.js — nothing to edit in this file. */
+
+const Q = new URLSearchParams(location.search);
+const P = { b: Q.get('b') || '', w: Q.get('w') || '', t: Q.get('t') || '' };
+if (location.search) history.replaceState(null, '', location.pathname);   // a refresh can't resend an old code
+const view = document.getElementById('view');
+
+const MSG = {
+  NO_CODE:     ['bad',  '!', 'Scan the QR code on the branch screen.', 'امسح الكود الموجود على شاشة الفرع'],
+  EXPIRED:     ['wait', '↻', 'This code has expired. Scan the screen again.', 'الكود انتهى — امسح الشاشة مرة أخرى'],
+  BAD_BRANCH:  ['bad',  '!', 'This branch is not set up. Tell the admin.', 'الفرع غير مسجل — بلغ الإدارة'],
+  NO_DEVICE:   ['bad',  '!', 'Your browser blocks saving data. Open the link in Chrome or Safari, not in private mode.',
+                'المتصفح يمنع حفظ البيانات — افتح الرابط في Chrome أو Safari وليس في وضع التصفح الخفي'],
+  REVOKED:     ['bad',  '✕', 'This phone is no longer registered. Contact the admin.', 'هذا الموبايل لم يعد مسجلاً — تواصل مع الإدارة'],
+  INACTIVE:    ['bad',  '✕', 'Your employee code is not active. Contact the admin.', 'كود الموظف غير مفعل — تواصل مع الإدارة'],
+  NETWORK:     ['bad',  '!', 'No connection. Check your internet and scan again.', 'لا يوجد اتصال — تأكد من الإنترنت وامسح مرة أخرى'],
+  ERROR:       ['bad',  '!', 'Something went wrong on the server. Scan again, and tell the admin if it repeats.',
+                'حدث خطأ — امسح مرة أخرى وبلغ الإدارة لو تكرر']
+};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function show(kind, mark, en, ar, extra) {
+  view.innerHTML =
+    '<div class="mark ' + kind + '">' + mark + '</div>' +
+    '<h1>' + esc(en) + '</h1><p class="ar">' + esc(ar) + '</p>' + (extra || '');
+}
+
+function deviceId() {
+  try {
+    let id = localStorage.getItem('manara_device_id');
+    if (!id) {
+      id = (crypto.randomUUID && crypto.randomUUID()) ||
+           Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('manara_device_id', id);
+    }
+    return localStorage.getItem('manara_device_id') === id ? id : '';
+  } catch (e) { return ''; }
+}
+
+async function api(params) {
+  params._ = Date.now();                                   // never use a cached answer
+  const res = await fetch(API_URL + '?' + new URLSearchParams(params).toString());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function handle(r) {
+  if (r.status === 'OK' || r.status === 'PENDING') {
+    const isIn = r.type === 'IN';
+    const pending = r.status === 'PENDING';
+    show(pending ? 'wait' : 'good', pending ? '…' : '✓',
+      isIn ? 'Arrival recorded' : 'Departure recorded',
+      isIn ? 'تم تسجيل الحضور' : 'تم تسجيل الانصراف',
+      '<div class="time">' + esc(r.time) + '</div>' +
+      '<div class="who">' + esc(r.name) + '</div>' +
+      '<div class="where">' + esc(r.branchName) + '</div>' +
+      (pending ? '<p class="note">This phone is waiting for admin approval. Your scan is saved and will count once it is approved.<br>' +
+                 '<span dir="rtl">الموبايل في انتظار اعتماد الإدارة — التسجيل محفوظ وسيُحتسب بعد الاعتماد</span></p>' : ''));
+    return;
+  }
+  if (r.status === 'DUPLICATE') {
+    show('good', '✓', 'Already recorded at ' + r.time, 'تم التسجيل بالفعل الساعة ' + r.time,
+      '<div class="who" style="margin-top:14px">' + esc(r.name) + '</div>');
+    return;
+  }
+  if (r.status === 'REGISTER') { registerForm(r.branchName); return; }
+  const m = MSG[r.status] || MSG.ERROR;
+  show(m[0], m[1], m[2], m[3]);
+}
+
+function registerForm(branchName) {
+  show('idle', '1', 'First time on this phone', 'أول مرة على هذا الموبايل',
+    '<p class="where">' + esc(branchName) + '</p>' +
+    '<label for="emp">Your employee code <span dir="rtl">— كود الموظف</span></label>' +
+    '<input id="emp" inputmode="text" autocomplete="off" autocapitalize="characters">' +
+    '<button id="go">Register this phone</button>' +
+    '<div class="err" id="err"></div>' +
+    '<p class="note">Use your own phone only. The admin approves each phone once.<br>' +
+    '<span dir="rtl">استخدم موبايلك الشخصي فقط — الإدارة تعتمد كل موبايل مرة واحدة</span></p>');
+
+  const input = document.getElementById('emp');
+  const btn = document.getElementById('go');
+  const err = document.getElementById('err');
+  input.focus();
+
+  const submit = async () => {
+    const code = input.value.trim();
+    if (!code) { err.textContent = 'Enter your employee code. — اكتب كود الموظف'; return; }
+    btn.disabled = true; err.textContent = '';
+    try {
+      const r = await api({ api: 'register', b: P.b, w: P.w, t: P.t, d: deviceId(), e: code, ua: navigator.userAgent });
+      if (r.status === 'UNKNOWN_EMP') {
+        btn.disabled = false;
+        err.textContent = 'This code is not in the employee list. Check it and try again. — الكود غير موجود';
+        return;
+      }
+      handle(r);
+    } catch (e) {
+      btn.disabled = false;
+      err.textContent = MSG.NETWORK[2];
+    }
+  };
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+}
+
+(async function start() {
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  if (typeof API_URL === 'undefined' || !/\/exec$/.test(API_URL)) {
+    show('bad', '!', 'Setup incomplete: config.js has no web app address.', 'الإعداد غير مكتمل — بلغ الإدارة');
+    return;
+  }
+  if (!P.b || !P.t) { handle({ status: 'NO_CODE' }); return; }
+  const id = deviceId();
+  if (!id) { handle({ status: 'NO_DEVICE' }); return; }
+  try {
+    handle(await api({ api: 'checkin', b: P.b, w: P.w, t: P.t, d: id }));
+  } catch (e) {
+    handle({ status: 'NETWORK' });
+  }
+})();
+</script>
+</body>
+</html>
