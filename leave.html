@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Al-Manara — Leave Request</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --night:#0E2A47; --lamp:#F2B705; --ink:#1B2B3A; --muted:#5E7184; --line:#D5DEE7;
+          --good:#1A7F4B; --wait:#9A6700; --bad:#B42318; }
+  body { margin:0; background:#F4F7FA; color:var(--ink);
+    font-family:'IBM Plex Sans Arabic', Tahoma, 'Segoe UI', Arial, sans-serif; }
+  .top { background:var(--night); color:#fff; padding:14px 20px; font-weight:600; }
+  .top span { color:var(--lamp); }
+  #view { max-width:440px; margin:0 auto; padding:24px 20px 40px; }
+  h1 { font-size:22px; margin:0 0 2px; }
+  .ar { direction:rtl; text-align:right; color:var(--muted); margin:2px 0 0; font-size:16px; }
+  .who { font-size:18px; margin:14px 0 4px; unicode-bidi:plaintext; }
+  label { display:block; margin-top:18px; font-weight:600; }
+  input, select, textarea { width:100%; box-sizing:border-box; font:inherit; font-size:18px; padding:11px 12px;
+          border:2px solid var(--line); border-radius:8px; margin-top:6px; background:#fff; color:var(--ink); }
+  textarea { min-height:70px; resize:vertical; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--night); }
+  .hint { color:var(--muted); font-size:13px; margin-top:4px; }
+  button { width:100%; font:inherit; font-size:18px; font-weight:600; padding:14px; border:0; border-radius:8px;
+           background:var(--night); color:#fff; margin-top:20px; }
+  button:disabled { opacity:.5; }
+  button:focus-visible { outline:3px solid var(--lamp); outline-offset:2px; }
+  .msg { margin-top:14px; min-height:1.3em; font-weight:600; }
+  .msg.good { color:var(--good); } .msg.bad { color:var(--bad); }
+  h2 { font-size:17px; margin:34px 0 8px; }
+  .req { display:flex; justify-content:space-between; gap:10px; align-items:center;
+         background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:8px; }
+  .req .d { font-variant-numeric:tabular-nums; }
+  .req .t { color:var(--muted); font-size:14px; }
+  .pill { font-size:13px; font-weight:700; padding:4px 10px; border-radius:20px; white-space:nowrap; }
+  .Pending { background:#FFF4CC; color:var(--wait); }
+  .Approved { background:#E3F4EA; color:var(--good); }
+  .Rejected { background:#FCE4E2; color:var(--bad); }
+  .stop { margin-top:20px; padding:16px; border-radius:8px; background:#FCE4E2; color:var(--bad); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="top">Al-Manara <span>Leave request</span></div>
+<div id="view"><p>Loading… — جاري التحميل…</p></div>
+
+<script src="config.js"></script>
+<script>
+const view = document.getElementById('view');
+const TYPES = [['Annual','Annual — اعتيادية'],['Sick','Sick — مرضية'],['Mission','Mission — مأمورية'],
+               ['Unpaid','Unpaid — بدون أجر'],['Other','Other — أخرى']];
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function deviceId() {
+  try { return localStorage.getItem('manara_device_id') || ''; } catch (e) { return ''; }
+}
+
+async function api(q) {
+  q._ = Date.now();
+  const res = await fetch(API_URL + '?' + new URLSearchParams(q).toString());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function stop(en, ar) {
+  view.innerHTML = '<div class="stop">' + esc(en) + '<div class="ar" style="color:inherit">' + esc(ar) + '</div></div>';
+}
+
+function listHtml(reqs) {
+  if (!reqs || !reqs.length) return '<p class="hint">No requests yet — لا توجد طلبات بعد</p>';
+  const lbl = { Pending: 'Pending — قيد المراجعة', Approved: 'Approved — مقبول', Rejected: 'Rejected — مرفوض' };
+  return reqs.map(r =>
+    '<div class="req"><div><div class="d">' + esc(r.from) + (r.to !== r.from ? ' → ' + esc(r.to) : '') +
+    '</div><div class="t">' + esc(r.type) + '</div></div>' +
+    '<span class="pill ' + esc(r.status) + '">' + esc(lbl[r.status] || r.status) + '</span></div>').join('');
+}
+
+function render(d) {
+  view.innerHTML =
+    '<h1>Request leave</h1><p class="ar">طلب إجازة</p>' +
+    '<div class="who">' + esc(d.name) + ' · ' + esc(d.code) + '</div>' +
+    '<label for="from">First day — أول يوم</label><input id="from" type="date">' +
+    '<label for="to">Last day — آخر يوم</label><input id="to" type="date">' +
+    '<div class="hint">Leave empty for one day — اتركه فارغاً ليوم واحد</div>' +
+    '<label for="type">Type — النوع</label><select id="type"><option value="">—</option>' +
+      TYPES.map(t => '<option value="' + t[0] + '">' + t[1] + '</option>').join('') + '</select>' +
+    '<label for="note">Note (optional) — ملاحظات</label><textarea id="note" maxlength="200"></textarea>' +
+    '<button id="send">Send request — إرسال الطلب</button><div class="msg" id="msg"></div>' +
+    '<h2>My requests — طلباتي</h2><div id="list">' + listHtml(d.requests) + '</div>';
+
+  const $ = id => document.getElementById(id);
+  const btn = $('send'), msg = $('msg');
+  btn.addEventListener('click', async () => {
+    msg.className = 'msg'; msg.textContent = '';
+    if (!$('from').value) { msg.className = 'msg bad'; msg.textContent = 'Choose the first day — اختر أول يوم'; return; }
+    if (!$('type').value) { msg.className = 'msg bad'; msg.textContent = 'Choose the type — اختر النوع'; return; }
+    btn.disabled = true;
+    try {
+      const r = await api({ api: 'leave', d: deviceId(), from: $('from').value, to: $('to').value,
+                            type: $('type').value, note: $('note').value.trim() });
+      if (r.status === 'SENT') {
+        msg.className = 'msg good';
+        msg.textContent = 'Sent. It counts once the admin approves it. — تم الإرسال وسيُحتسب بعد اعتماد الإدارة';
+        $('from').value = ''; $('to').value = ''; $('type').value = ''; $('note').value = '';
+        $('list').innerHTML = listHtml(r.requests);
+      } else if (r.status === 'BAD_INPUT') {
+        msg.className = 'msg bad'; msg.textContent = r.en + ' — ' + r.ar;
+      } else if (r.status === 'DUPLICATE') {
+        msg.className = 'msg bad'; msg.textContent = 'You already sent this request. — هذا الطلب مُرسل بالفعل';
+      } else if (r.status === 'TOO_MANY') {
+        msg.className = 'msg bad'; msg.textContent = 'Too many pending requests — wait for the admin. — طلبات كثيرة قيد المراجعة';
+      } else { start(); return; }
+    } catch (e) {
+      msg.className = 'msg bad'; msg.textContent = 'No connection — try again. — لا يوجد اتصال، حاول مرة أخرى';
+    }
+    btn.disabled = false;
+  });
+}
+
+async function start() {
+  if (typeof API_URL === 'undefined' || !/\/exec$/.test(API_URL)) { stop('Setup incomplete.', 'الإعداد غير مكتمل'); return; }
+  const d = deviceId();
+  if (!d) {
+    stop('This phone is not registered. Scan the attendance QR at your branch first, in this same browser.',
+         'هذا الموبايل غير مسجل — امسح كود الحضور في الفرع أولاً من نفس المتصفح');
+    return;
+  }
+  try {
+    const r = await api({ api: 'myleave', d: d });
+    if (r.status === 'OK') { render(r); return; }
+    const M = {
+      NOT_REGISTERED: ['This phone is not registered. Scan the attendance QR at your branch first.', 'هذا الموبايل غير مسجل — امسح كود الحضور في الفرع أولاً'],
+      DEVICE_PENDING: ['This phone is waiting for admin approval. Try again once it is approved.', 'الموبايل في انتظار اعتماد الإدارة — حاول بعد الاعتماد'],
+      REVOKED: ['This phone is no longer registered. Contact the admin.', 'هذا الموبايل لم يعد مسجلاً — تواصل مع الإدارة'],
+      INACTIVE: ['Your employee code is not active. Contact the admin.', 'كود الموظف غير مفعل — تواصل مع الإدارة']
+    };
+    const m = M[r.status] || ['Something went wrong. Try again later.', 'حدث خطأ — حاول لاحقاً'];
+    stop(m[0], m[1]);
+  } catch (e) {
+    stop('No connection. Check your internet and try again.', 'لا يوجد اتصال — تأكد من الإنترنت وحاول مرة أخرى');
+  }
+}
+start();
+</script>
+</body>
+</html>
