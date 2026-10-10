@@ -158,7 +158,8 @@ async function handle(r) {
         isIn ? 'تم تسجيل الحضور' : 'تم تسجيل الانصراف',
         '<div class="time">' + esc(r.time) + '</div>' +
         '<div class="who">' + esc(r.name) + '</div>' +
-        '<div class="where">' + esc(r.branchName) + '</div>' + note);
+        '<div class="where">' + esc(r.branchName) + '</div>' + note +
+        '<p class="note"><a href="leave.html" style="color:#0E2A47;font-weight:600">Request leave — طلب إجازة</a></p>');
       return;
     }
     case 'DUPLICATE':
