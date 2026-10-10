@@ -137,7 +137,8 @@ async function go() {
 }
 
 function retryScreen(en, ar) {
-  show('wait', '!', en, ar, '<button id="again">Try again — حاول مرة أخرى</button>');
+  show('wait', '!', en, ar, '<button id="again">Try again — حاول مرة أخرى</button>' +
+    '<p class="note"><a href="leave.html" style="color:#0E2A47;font-weight:600">Request leave instead — طلب إجازة بدلاً من ذلك</a></p>');
   document.getElementById('again').addEventListener('click', async () => { await locate(true); go(); });
 }
 
