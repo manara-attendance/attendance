@@ -165,7 +165,8 @@ async function handle(r) {
     }
     case 'DUPLICATE':
       show('good', '✓', 'Already recorded at ' + r.time, 'تم التسجيل بالفعل الساعة ' + r.time,
-        '<div class="who" style="margin-top:14px">' + esc(r.name) + '</div>');
+        '<div class="who" style="margin-top:14px">' + esc(r.name) + '</div>' +
+        '<p class="note"><a href="leave.html" style="color:#0E2A47;font-weight:600">Request leave — طلب إجازة</a></p>');
       return;
     case 'REGISTER':      registerForm(r.branchName); return;
     case 'REGISTERED':    go(); return;
