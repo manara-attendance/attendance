@@ -248,9 +248,28 @@ function registerForm(branchName) {
   if (!P.b || !(P.t || P.s)) { handle({ status: 'NO_CODE' }); return; }
   DEV = deviceId();
   if (!DEV) { handle({ status: 'NO_DEVICE' }); return; }
-  if (P.g) await locate(false);
+  const geoWait = P.g ? getLocation(false) : null;   // look up the location while the choice is on screen
+  if (await chooseScreen() === 'leave') { location.href = 'leave.html'; return; }
+  if (geoWait) { show('idle', '…', 'Checking your location…', 'جاري تحديد الموقع…'); GEO = await geoWait; GX = true; }
   go();                     // the server answers NEED_NOTE (with a 10-minute hold) if a note is required
 })();
+
+/* Two choices after the scan; attendance is recorded by itself after 5 seconds */
+function chooseScreen() {
+  return new Promise(resolve => {
+    let left = 5, done = false;
+    show('idle', '?', 'Attendance or leave?', 'حضور أم إجازة؟',
+      '<button id="rec">Record attendance <span id="cd">(5)</span><br><span dir="rtl">تسجيل الحضور / الانصراف</span></button>' +
+      '<button id="lv" style="background:#fff;color:var(--night);border:2px solid var(--night)">Request leave — طلب إجازة</button>' +
+      '<p class="note">Attendance is recorded automatically in 5 seconds.<br>' +
+      '<span dir="rtl">سيتم تسجيل الحضور تلقائياً خلال 5 ثوانٍ</span></p>');
+    const cd = document.getElementById('cd');
+    const finish = v => { if (done) return; done = true; clearInterval(timer); resolve(v); };
+    const timer = setInterval(() => { left--; if (left <= 0) finish('record'); else cd.textContent = '(' + left + ')'; }, 1000);
+    document.getElementById('rec').addEventListener('click', () => finish('record'));
+    document.getElementById('lv').addEventListener('click', () => finish('leave'));
+  });
+}
 </script>
 </body>
 </html>
