@@ -176,6 +176,10 @@ async function handle(r) {
       retryScreen('Location is needed here. Turn on location for your browser, then try again.',
                   'الموقع مطلوب هنا — فعّل الموقع للمتصفح ثم حاول مرة أخرى');
       return;
+    case 'LOW_ACCURACY':
+      retryScreen('Your location is not precise enough (about ±' + r.accuracy + ' m). Turn on Precise Location for your browser, move near a window or step outside, then try again.',
+                  'تحديد موقعك غير دقيق (حوالي ±' + r.accuracy + ' متر) — فعّل الموقع الدقيق للمتصفح، واقترب من نافذة أو اخرج للخارج، ثم حاول مرة أخرى');
+      return;
     case 'OUT_OF_RANGE':
       retryScreen('You are about ' + r.distance + ' m from the branch. Move closer, then try again.',
                   'أنت على بُعد حوالي ' + r.distance + ' متر من الفرع — اقترب ثم حاول مرة أخرى');
