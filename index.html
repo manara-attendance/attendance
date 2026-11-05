@@ -52,7 +52,7 @@ const P = { b: Q.get('b') || '', w: Q.get('w') || '', t: Q.get('t') || '', s: Q.
             g: Q.get('g') === '1', n: Q.get('n') === '1' };
 if (location.search) history.replaceState(null, '', location.pathname);   // a refresh can't resend an old code
 const view = document.getElementById('view');
-let DEV = '', HOLD = null, GEO = {}, GX = false, NOTE = '';
+let DEV = '', HOLD = null, GEO = {}, GX = false, NOTE = '', GEOERR = '';
 
 const MSG = {
   NO_CODE:        ['bad',  '!', 'Scan the QR code at the branch.', 'امسح كود الحضور الموجود في الفرع'],
@@ -66,6 +66,20 @@ const MSG = {
   NETWORK:        ['bad',  '!', 'No connection. Check your internet and scan again.', 'لا يوجد اتصال — تأكد من الإنترنت وامسح مرة أخرى'],
   ERROR:          ['bad',  '!', 'Something went wrong on the server. Scan again, and tell the admin if it repeats.',
                    'حدث خطأ — امسح مرة أخرى وبلغ الإدارة لو تكرر']
+};
+
+/* What to tell the employee when no location arrived, by the reason the browser gave */
+const NOLOC = {
+  denied:      ['Location is blocked for this page. Allow it in the browser (Android: tap the lock icon next to the address; iPhone: aA, then Website Settings), then try again.',
+                'الموقع محظور لهذه الصفحة — اسمح به من المتصفح (أندرويد: اضغط رمز القفل بجانب العنوان، آيفون: aA ثم إعدادات الموقع)، ثم حاول مرة أخرى'],
+  timeout:     ['Your phone could not find your location in time. Open the map app until it shows where you are, stand near a window, then try again.',
+                'الموبايل لم يحدد موقعك في الوقت المحدد — افتح تطبيق الخرائط حتى يظهر مكانك، وقف بجوار نافذة، ثم حاول مرة أخرى'],
+  unavailable: ['Location is off or not available on this phone. Turn on Location in the quick settings, then try again.',
+                'خدمة الموقع مغلقة أو غير متاحة على الموبايل — فعّل الموقع من الإعدادات السريعة، ثم حاول مرة أخرى'],
+  unsupported: ['This browser cannot share your location. Open the link in Chrome or Safari.',
+                'هذا المتصفح لا يدعم تحديد الموقع — افتح الرابط في Chrome أو Safari'],
+  '':          ['Location is needed here. Turn on location for your browser, then try again.',
+                'الموقع مطلوب هنا — فعّل الموقع للمتصفح ثم حاول مرة أخرى']
 };
 
 function esc(s) {
@@ -91,23 +105,25 @@ function deviceId() {
   } catch (e) { return ''; }
 }
 
-/* Location: try for a few seconds; the server decides what happens without it */
+/* Location: wait up to 20 seconds; the server decides what happens without it.
+   GEOERR keeps why the last attempt failed, so the screen can say what to fix. */
 function getLocation(fresh) {
   return new Promise(resolve => {
-    if (!navigator.geolocation) return resolve({});
+    GEOERR = '';
+    if (!navigator.geolocation) { GEOERR = 'unsupported'; return resolve({}); }
     let done = false;
-    const finish = v => { if (!done) { done = true; resolve(v); } };
-    setTimeout(() => finish({}), 10000);
+    const finish = (v, why) => { if (!done) { done = true; GEOERR = why || ''; resolve(v); } };
+    setTimeout(() => finish({}, 'timeout'), 21000);
     navigator.geolocation.getCurrentPosition(
       p => finish({ la: p.coords.latitude.toFixed(6), lo: p.coords.longitude.toFixed(6),
                     ac: Math.round(p.coords.accuracy) }),
-      () => finish({}),
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: fresh ? 0 : 60000 });
+      e => finish({}, e && e.code === 1 ? 'denied' : e && e.code === 3 ? 'timeout' : 'unavailable'),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: fresh ? 0 : 60000 });
   });
 }
 
 async function locate(fresh) {
-  show('idle', '…', 'Checking your location…', 'جاري تحديد الموقع…');
+  show('idle', '…', 'Checking your location… (up to 20 seconds)', 'جاري تحديد الموقع… (حتى 20 ثانية)');
   GEO = await getLocation(fresh);
   GX = true;
 }
@@ -136,8 +152,9 @@ async function go() {
   catch (e) { handle({ status: 'NETWORK' }); }
 }
 
-function retryScreen(en, ar) {
+function retryScreen(en, ar, tag) {
   show('wait', '!', en, ar, '<button id="again">Try again — حاول مرة أخرى</button>' +
+    (tag ? '<p class="note">Reason code: ' + esc(tag) + '</p>' : '') +
     '<p class="note"><a href="leave.html" style="color:#0E2A47;font-weight:600">Request leave instead — طلب إجازة بدلاً من ذلك</a></p>');
   document.getElementById('again').addEventListener('click', async () => { await locate(true); go(); });
 }
@@ -172,10 +189,11 @@ async function handle(r) {
     case 'REGISTERED':    go(); return;
     case 'NEED_LOCATION': await locate(false); go(); return;
     case 'NEED_NOTE':     noteForm(); return;
-    case 'NO_LOCATION':
-      retryScreen('Location is needed here. Turn on location for your browser, then try again.',
-                  'الموقع مطلوب هنا — فعّل الموقع للمتصفح ثم حاول مرة أخرى');
+    case 'NO_LOCATION': {
+      const why = NOLOC[GEOERR] || NOLOC[''];
+      retryScreen(why[0], why[1], GEOERR);
       return;
+    }
     case 'LOW_ACCURACY':
       retryScreen('Your location is not precise enough (about ±' + r.accuracy + ' m). Turn on Precise Location for your browser, move near a window or step outside, then try again.',
                   'تحديد موقعك غير دقيق (حوالي ±' + r.accuracy + ' متر) — فعّل الموقع الدقيق للمتصفح، واقترب من نافذة أو اخرج للخارج، ثم حاول مرة أخرى');
@@ -254,7 +272,7 @@ function registerForm(branchName) {
   if (!DEV) { handle({ status: 'NO_DEVICE' }); return; }
   const geoWait = P.g ? getLocation(false) : null;   // look up the location while the choice is on screen
   if (await chooseScreen() === 'leave') { location.href = 'leave.html'; return; }
-  if (geoWait) { show('idle', '…', 'Checking your location…', 'جاري تحديد الموقع…'); GEO = await geoWait; GX = true; }
+  if (geoWait) { show('idle', '…', 'Checking your location… (up to 20 seconds)', 'جاري تحديد الموقع… (حتى 20 ثانية)'); GEO = await geoWait; GX = true; }
   go();                     // the server answers NEED_NOTE (with a 10-minute hold) if a note is required
 })();
 
