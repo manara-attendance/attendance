@@ -135,6 +135,7 @@ function params(extra) {
   else { p.w = P.w; p.t = P.t; }
   Object.assign(p, GEO);
   if (GX) p.gx = '1';
+  if (GX && !GEO.la && GEOERR) p.ge = GEOERR;   // why no location arrived (Refused Scans tab)
   if (NOTE) p.n = NOTE;
   return Object.assign(p, extra || {});
 }
