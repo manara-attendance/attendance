@@ -122,8 +122,29 @@ function getLocation(fresh) {
   });
 }
 
+/* Will the browser ask a location question? 'granted' = no question; 'prompt' = it will ask;
+   'denied' = blocked; 'unknown' = the browser cannot tell (older iPhones). Never waits more than 1 s. */
+function geoPermission() {
+  return new Promise(resolve => {
+    let done = false;
+    const fin = v => { if (!done) { done = true; resolve(v); } };
+    setTimeout(() => fin('unknown'), 1000);
+    try { navigator.permissions.query({ name: 'geolocation' }).then(s => fin(s.state), () => fin('unknown')); }
+    catch (e) { fin('unknown'); }
+  });
+}
+
+/* Asks for the location on a screen of its own. When the browser is going to ask its question, the screen
+   says so, with nothing else on it to tap by mistake (2026-11-08: a question closed by accident was the
+   usual cause of 'denied'). */
 async function locate(fresh) {
-  show('idle', '…', 'Checking your location… (up to 20 seconds)', 'جاري تحديد الموقع… (حتى 20 ثانية)');
+  const perm = await geoPermission();
+  if (perm === 'prompt' || perm === 'unknown')
+    show('idle', '…', 'Your phone will ask to use your location: tap Allow', 'سيسألك الموبايل عن استخدام موقعك: اضغط سماح',
+      '<p class="note">On Android choose <b>Allow while visiting the site</b>, not "Allow this time", so it does not ask every time.<br>' +
+      '<span dir="rtl">في أندرويد اختر <b>السماح أثناء زيارة الموقع</b> وليس «السماح هذه المرة» حتى لا يسأل كل مرة</span></p>');
+  else
+    show('idle', '…', 'Checking your location… (up to 20 seconds)', 'جاري تحديد الموقع… (حتى 20 ثانية)');
   GEO = await getLocation(fresh);
   GX = true;
 }
@@ -271,9 +292,13 @@ function registerForm(branchName) {
   if (!P.b || !(P.t || P.s)) { handle({ status: 'NO_CODE' }); return; }
   DEV = deviceId();
   if (!DEV) { handle({ status: 'NO_DEVICE' }); return; }
-  const geoWait = P.g ? getLocation(false) : null;   // look up the location while the choice is on screen
+  /* Look up the location while the choice is on screen only when the browser will not ask a question;
+     otherwise ask after the choice, on a screen of its own (2026-11-08). */
+  const perm = P.g ? await geoPermission() : '';
+  const geoWait = perm === 'granted' ? getLocation(false) : null;
   if (await chooseScreen() === 'leave') { location.href = 'leave.html'; return; }
   if (geoWait) { show('idle', '…', 'Checking your location… (up to 20 seconds)', 'جاري تحديد الموقع… (حتى 20 ثانية)'); GEO = await geoWait; GX = true; }
+  else if (P.g) await locate(false);
   go();                     // the server answers NEED_NOTE (with a 10-minute hold) if a note is required
 })();
 
