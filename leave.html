@@ -88,7 +88,7 @@ function render(d) {
     '<label for="to">Last day — آخر يوم</label><input id="to" type="date">' +
     '<div class="hint">Leave empty for one day — اتركه فارغاً ليوم واحد</div>' +
     '<label for="type">Type — النوع</label><select id="type"><option value="">—</option>' +
-      TYPES.map(t => '<option value="' + t[0] + '">' + t[1] + '</option>').join('') + '</select>' +
+      TYPES.filter(t => !d.types || d.types.indexOf(t[0]) >= 0).map(t => '<option value="' + t[0] + '">' + t[1] + '</option>').join('') + '</select>' +
     '<label for="note">Note (optional) — ملاحظات</label><textarea id="note" maxlength="200"></textarea>' +
     '<button id="send">Send request — إرسال الطلب</button><div class="msg" id="msg"></div>' +
     '<h2>My requests — طلباتي</h2><div id="list">' + listHtml(d.requests) + '</div>';
