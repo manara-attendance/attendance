@@ -39,6 +39,14 @@
   .Approved { background:#E3F4EA; color:var(--good); }
   .Rejected { background:#FCE4E2; color:var(--bad); }
   .stop { margin-top:20px; padding:16px; border-radius:8px; background:#FCE4E2; color:var(--bad); font-weight:600; }
+  /* staff notice popup (2026-11-14) */
+  .nt-back { position:fixed; inset:0; background:rgba(14,42,71,.6); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .nt-box { background:#fff; border-radius:12px; width:100%; max-width:440px; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 10px 30px rgba(0,0,0,.3); overflow:hidden; }
+  .nt-done { background:#E3F4EA; color:var(--good); font-weight:700; padding:10px 16px; direction:rtl; text-align:right; }
+  .nt-title { font-weight:700; font-size:18px; color:var(--night); padding:14px 16px 6px; direction:rtl; text-align:right; }
+  .nt-text { padding:0 16px 8px; overflow-y:auto; white-space:pre-wrap; direction:rtl; text-align:right; line-height:1.7; font-size:16px; }
+  .nt-err { color:var(--bad); padding:0 16px; min-height:1.2em; direction:rtl; text-align:right; font-size:14px; }
+  .nt-box button { width:auto; margin:8px 16px 16px; }
 </style>
 </head>
 <body>
@@ -122,6 +130,33 @@ function render(d) {
   });
 }
 
+/* Staff notice (2026-11-14). The server adds r.notice only while this employee has not confirmed it;
+   the leave form opens once the employee taps the confirm button. */
+function noticeGate(n, dev, done, then) {
+  const back = document.createElement('div');
+  back.className = 'nt-back';
+  back.innerHTML = '<div class="nt-box" role="dialog" aria-modal="true">' +
+    (done ? '<div class="nt-done">' + esc(done) + '</div>' : '') +
+    '<div class="nt-title">رسالة من الإدارة</div>' +
+    '<div class="nt-text">' + esc(n.text) + '</div>' +
+    '<div class="nt-err" id="nterr"></div>' +
+    '<button id="ntok">قرأت وفهمت</button></div>';
+  document.body.appendChild(back);
+  const btn = document.getElementById('ntok'), err = document.getElementById('nterr');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; err.textContent = '';
+    try {
+      const r = await api({ api: 'notice_ack', d: dev, n: n.id });
+      if (r.status !== 'OK') throw new Error(r.status);
+      back.remove();
+      if (then) then();
+    } catch (e) {
+      btn.disabled = false;
+      err.textContent = 'تعذر الإرسال — تأكد من الإنترنت واضغط مرة أخرى';
+    }
+  });
+}
+
 async function start() {
   if (typeof API_URL === 'undefined' || !/\/exec$/.test(API_URL)) { stop('Setup incomplete.', 'الإعداد غير مكتمل'); return; }
   const d = deviceId();
@@ -132,7 +167,11 @@ async function start() {
   }
   try {
     const r = await api({ api: 'myleave', d: d });
-    if (r.status === 'OK') { render(r); return; }
+    if (r.status === 'OK') {
+      if (r.notice) noticeGate(r.notice, d, '', function () { render(r); });   // staff notice first, then the form
+      else render(r);
+      return;
+    }
     const M = {
       NOT_REGISTERED: ['This phone is not registered. Scan the attendance QR at your branch first.', 'هذا الموبايل غير مسجل — امسح كود الحضور في الفرع أولاً'],
       DEVICE_PENDING: ['This phone is waiting for admin approval. Try again once it is approved.', 'الموبايل في انتظار اعتماد الإدارة — حاول بعد الاعتماد'],
