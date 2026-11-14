@@ -149,7 +149,8 @@ function noticeGate(n, dev, done, then) {
       const r = await api({ api: 'notice_ack', d: dev, n: n.id });
       if (r.status !== 'OK') throw new Error(r.status);
       back.remove();
-      if (then) then();
+      if (r.next) noticeGate(r.next, dev, done, then);   // queue: the next unconfirmed notice, oldest first
+      else if (then) then();
     } catch (e) {
       btn.disabled = false;
       err.textContent = 'تعذر الإرسال — تأكد من الإنترنت واضغط مرة أخرى';
