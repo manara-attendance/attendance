@@ -62,6 +62,8 @@ const MSG = {
   NO_DEVICE:      ['bad',  '!', 'Your browser blocks saving data. Open the link in Chrome or Safari, not in private mode.',
                    'المتصفح يمنع حفظ البيانات — افتح الرابط في Chrome أو Safari وليس في وضع التصفح الخفي'],
   REVOKED:        ['bad',  '✕', 'This phone is no longer registered. Contact the admin.', 'هذا الموبايل لم يعد مسجلاً — تواصل مع الإدارة'],
+  DEVICE_PENDING: ['wait', '…', 'This phone is waiting for admin approval. Your scan was NOT recorded. Scan again after it is approved, and use the same phone and the same browser every time.',
+                   'الموبايل في انتظار اعتماد الإدارة — لم يتم تسجيل الحضور. امسح الكود مرة أخرى بعد الاعتماد، واستخدم نفس الموبايل ونفس المتصفح كل مرة'],
   INACTIVE:       ['bad',  '✕', 'Your employee code is not active. Contact the admin.', 'كود الموظف غير مفعل — تواصل مع الإدارة'],
   NETWORK:        ['bad',  '!', 'No connection. Check your internet and scan again.', 'لا يوجد اتصال — تأكد من الإنترنت وامسح مرة أخرى'],
   ERROR:          ['bad',  '!', 'Something went wrong on the server. Scan again, and tell the admin if it repeats.',
@@ -254,8 +256,8 @@ function registerForm(branchName) {
     '<input id="emp" inputmode="text" autocomplete="off" autocapitalize="characters">' +
     '<button id="go">Register this phone</button>' +
     '<div class="err" id="err"></div>' +
-    '<p class="note">Use your own phone only. The admin approves each phone once.<br>' +
-    '<span dir="rtl">استخدم موبايلك الشخصي فقط — الإدارة تعتمد كل موبايل مرة واحدة</span></p>');
+    '<p class="note">Use your own phone only, always in the same browser. The admin approves each phone once, and until then your scans are NOT recorded.<br>' +
+    '<span dir="rtl">استخدم موبايلك الشخصي فقط ونفس المتصفح دائماً — الإدارة تعتمد كل موبايل مرة واحدة، وقبل الاعتماد لا يتم تسجيل الحضور</span></p>');
 
   const input = document.getElementById('emp');
   const btn = document.getElementById('go');
