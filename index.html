@@ -103,16 +103,31 @@ function show(kind, mark, en, ar, extra) {
     '<h1>' + esc(en) + '</h1><p class="ar">' + esc(ar) + '</p>' + (extra || '');
 }
 
-function deviceId() {
+/* Phone ID (2026-11-18): kept in localStorage AND in a backup cookie of the same name.
+   Android may delete a site's storage when the phone is short of space; cookies survive that,
+   so the same ID comes back instead of a new "first time on this phone" registration.
+   localStorage wins when both exist, so nobody's current ID changes.
+   Never rename 'manara_device_id' — every phone would look new. */
+function idCookieGet() {
   try {
-    let id = localStorage.getItem('manara_device_id');
-    if (!id) {
-      id = (crypto.randomUUID && crypto.randomUUID()) ||
-           Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('manara_device_id', id);
-    }
-    return localStorage.getItem('manara_device_id') === id ? id : '';
+    const m = document.cookie.match(/(?:^|;\s*)manara_device_id=([^;]*)/);
+    return m ? decodeURIComponent(m[1]) : '';
   } catch (e) { return ''; }
+}
+function idCookieSet(id) {
+  try { document.cookie = 'manara_device_id=' + encodeURIComponent(id) + '; Max-Age=34560000; Path=/; SameSite=Lax; Secure'; } catch (e) {}
+}
+function deviceId() {
+  let id = '';
+  try { id = localStorage.getItem('manara_device_id') || ''; } catch (e) {}
+  if (!id) id = idCookieGet();
+  if (!id) id = (crypto.randomUUID && crypto.randomUUID()) ||
+                Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+  let kept = false;
+  try { localStorage.setItem('manara_device_id', id); kept = localStorage.getItem('manara_device_id') === id; } catch (e) {}
+  idCookieSet(id);
+  if (!kept) kept = idCookieGet() === id;
+  return kept ? id : '';
 }
 
 /* Location: wait up to 20 seconds; the server decides what happens without it.

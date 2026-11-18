@@ -64,8 +64,18 @@ function esc(s) {
     ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 
+/* Same phone ID as index.html; falls back to its backup cookie if storage was wiped (2026-11-18). */
 function deviceId() {
-  try { return localStorage.getItem('manara_device_id') || ''; } catch (e) { return ''; }
+  let id = '';
+  try { id = localStorage.getItem('manara_device_id') || ''; } catch (e) {}
+  if (!id) {
+    try {
+      const m = document.cookie.match(/(?:^|;\s*)manara_device_id=([^;]*)/);
+      id = m ? decodeURIComponent(m[1]) : '';
+    } catch (e) {}
+    if (id) { try { localStorage.setItem('manara_device_id', id); } catch (e) {} }
+  }
+  return id;
 }
 
 async function api(q) {
